@@ -22,6 +22,10 @@ type Profile struct {
 	TestModePublishableKey string
 	TerminalPOSDeviceID    string
 	DisplayName            string
+
+	PriceOneTimeID          string
+	PriceRecurringBasicID   string
+	PriceRecurringPremiumID string
 }
 
 // CreateProfile creates a profile when logging in
@@ -140,6 +144,33 @@ func (p *Profile) GetDisplayName() string {
 	return ""
 }
 
+// GetPriceOneTimeID returns the id of the user's configured price for stripe samples
+func (p *Profile) GetPriceOneTimeID() string {
+	if err := viper.ReadInConfig(); err == nil {
+		return viper.GetString(p.GetConfigField("stripe_samples_price_one_time_id"))
+	}
+
+	return ""
+}
+
+// GetPriceRecurringBasicID returns the id of the user's configured price for stripe samples
+func (p *Profile) GetPriceRecurringBasicID() string {
+	if err := viper.ReadInConfig(); err == nil {
+		return viper.GetString(p.GetConfigField("stripe_samples_price_recurring_basic_id"))
+	}
+
+	return ""
+}
+
+// GetPriceRecurringPremiumID returns the id of the user's configured price for stripe samples
+func (p *Profile) GetPriceRecurringPremiumID() string {
+	if err := viper.ReadInConfig(); err == nil {
+		return viper.GetString(p.GetConfigField("stripe_samples_price_recurring_premium_id"))
+	}
+
+	return ""
+}
+
 // GetTerminalPOSDeviceID returns the device id from the config for Terminal quickstart to use
 func (p *Profile) GetTerminalPOSDeviceID() string {
 	if err := viper.ReadInConfig(); err == nil {
@@ -206,6 +237,18 @@ func (p *Profile) writeProfile(runtimeViper *viper.Viper) error {
 
 	if p.DisplayName != "" {
 		runtimeViper.Set(p.GetConfigField("display_name"), strings.TrimSpace(p.DisplayName))
+	}
+
+	if p.PriceOneTimeID != "" {
+		runtimeViper.Set(p.GetConfigField("stripe_samples_price_one_time_id"), strings.TrimSpace(p.PriceOneTimeID))
+	}
+
+	if p.PriceRecurringBasicID != "" {
+		runtimeViper.Set(p.GetConfigField("stripe_samples_price_recurring_basic_id"), strings.TrimSpace(p.PriceRecurringBasicID))
+	}
+
+	if p.PriceRecurringPremiumID != "" {
+		runtimeViper.Set(p.GetConfigField("stripe_samples_price_recurring_premium_id"), strings.TrimSpace(p.PriceRecurringPremiumID))
 	}
 
 	runtimeViper.MergeInConfig()

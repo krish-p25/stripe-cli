@@ -3,7 +3,9 @@ package samples
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 
@@ -16,6 +18,7 @@ import (
 	"github.com/stripe/stripe-cli/pkg/ansi"
 	"github.com/stripe/stripe-cli/pkg/config"
 	g "github.com/stripe/stripe-cli/pkg/git"
+	requests "github.com/stripe/stripe-cli/pkg/requests"
 	"github.com/stripe/stripe-cli/pkg/stripeauth"
 )
 
@@ -24,6 +27,10 @@ type sampleConfig struct {
 	ConfigureDotEnv bool                      `json:"configureDotEnv"`
 	PostInstall     map[string]string         `json:"postInstall"`
 	Integrations    []sampleConfigIntegration `json:"integrations"`
+
+	// Some samples need to be configured with the ids of
+	// particular stripe resources (typically products or prices)
+	RequiredResources []string `json:"requiredResources"`
 }
 
 func (sc *sampleConfig) hasIntegrations() bool {
@@ -185,6 +192,24 @@ func (s *Samples) SelectOptions() error {
 		s.server = ""
 	}
 
+	missingResources := s.MissingRequiredResources()
+
+	if len(missingResources) > 0 {
+		shouldCreate, err := shouldCreateRequiredResourcesPrompt()
+		if err != nil {
+			return err
+		}
+		if shouldCreate {
+			for _, r := range missingResources {
+				id, err := s.CreateRequiredResource(r)
+				if err != nil {
+					return err
+				}
+				s.PersistRequiredResourceID(r, id)
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -255,6 +280,96 @@ func (s *Samples) Copy(target string) error {
 	}
 
 	return nil
+}
+
+func (s *Samples) GetRequiredResourceId(requiredResource string) string {
+	if requiredResource == "stripe_samples_price_one_time_id" {
+		return s.Config.Profile.GetPriceOneTimeID()
+	}
+	if requiredResource == "stripe_samples_price_recurring_basic_id" {
+		return s.Config.Profile.GetPriceRecurringBasicID()
+	}
+	if requiredResource == "stripe_samples_price_recurring_premium_id" {
+		return s.Config.Profile.GetPriceRecurringPremiumID()
+	}
+	return ""
+}
+
+func GetRequiredResourceDescription(requiredResource string) string {
+	if requiredResource == "stripe_samples_price_one_time_id" {
+		return "one time price"
+	}
+	if requiredResource == "stripe_samples_price_recurring_basic_id" {
+		return "recurring price for a 'basic' plan"
+	}
+	if requiredResource == "stripe_samples_price_recurring_premium_id" {
+		return "recurring price for a 'premium' plan"
+	}
+	return ""
+}
+
+func (s *Samples) CreateRequiredResource(requiredResource string) (string, error) {
+	// if requiredResource == "stripe_samples_price_one_time_id" {
+	base := requests.Base{
+		Profile:        &s.Config.Profile,
+		Method:         http.MethodPost,
+		SuppressOutput: true,
+		APIBaseURL:     "https://api.stripe.com",
+	}
+	params := requests.RequestParameters{}
+	params.AppendData([]string{
+		"currency=usd",
+		"unit_amount=1000",
+		"product_data[name]=Stripe Sample Basic",
+		"recurring[interval]=month",
+	})
+	apiKey, err := s.Config.Profile.GetAPIKey(false)
+	if err != nil {
+		return "", err
+	}
+	bytes, err := base.MakeRequest(apiKey, "/v1/prices", &params, true)
+	if err != nil {
+		return "", err
+	}
+	var fields map[string]interface{}
+	err = json.Unmarshal(bytes, &fields)
+	if err != nil {
+		return "", err
+	}
+
+	id, ok := fields["id"].(string)
+	if !ok {
+		return "", errors.New(fmt.Sprintf("Unexpected response from stripe API, did not contain ID: %s", string(bytes)))
+	}
+
+	return id, nil
+}
+
+func (s *Samples) PersistRequiredResourceID(requiredResource string, id string) error {
+	if requiredResource == "stripe_samples_price_one_time_id" {
+		s.Config.Profile.PriceOneTimeID = id
+	}
+	if requiredResource == "stripe_samples_price_recurring_basic_id" {
+		s.Config.Profile.PriceRecurringBasicID = id
+	}
+	if requiredResource == "stripe_samples_price_recurring_premium_id" {
+		s.Config.Profile.PriceRecurringPremiumID = id
+	}
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *Samples) MissingRequiredResources() []string {
+	ret := []string{}
+	for _, requiredResource := range s.sampleConfig.RequiredResources {
+		id := s.GetRequiredResourceId(requiredResource)
+		if id == "" {
+			ret = append(ret, requiredResource)
+		}
+	}
+	return ret
 }
 
 // ConfigureDotEnv takes the .env.example from the provided location and
@@ -390,6 +505,14 @@ func integrationSelectPrompt(sc *sampleConfig) (*sampleConfigIntegration, error)
 	}
 
 	return selectedIntegration, nil
+}
+
+func shouldCreateRequiredResourcesPrompt() (bool, error) {
+	selected, err := selectOptions("auto-create behavior", "This Stripe Sample requires a few pre-existing resources to exist in test mode on your Stripe Account. Would you like us to automatically create these and configure their IDs?", []string{"yes", "no"})
+	if err != nil {
+		return false, err
+	}
+	return selected == "yes", nil
 }
 
 func serverSelectPrompt(servers []string) (string, error) {
